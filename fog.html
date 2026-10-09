@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>fog</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<style>
+  :root {
+    --tile: #1c2a2d;
+    --tile-deep: #121b1d;
+    --steam: #e8eeec;
+    --steam-dim: rgba(232, 238, 236, 0.66);
+    --glass: rgba(255, 255, 255, 0.14);
+    --glass-edge: rgba(255, 255, 255, 0.38);
+    --alert: #ffb4a0;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--tile-deep); color: var(--steam); }
+  body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; -webkit-font-smoothing: antialiased; }
+
+  canvas.layer { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #fx { pointer-events: none; }
+  #cam { position: fixed; width: 1px; height: 1px; opacity: 0; pointer-events: none; left: 0; top: 0; }
+
+  /* ---------- start screen ---------- */
+  #start {
+    position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+    padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom));
+    background:
+      radial-gradient(60% 50% at 30% 35%, rgba(222, 235, 233, 0.20), transparent 70%),
+      radial-gradient(55% 45% at 72% 65%, rgba(222, 235, 233, 0.13), transparent 72%),
+      linear-gradient(180deg, var(--tile) 0%, var(--tile-deep) 100%);
+  }
+  #start[hidden] { display: none; }
+  .card { width: min(30rem, 100%); text-align: left; }
+  h1 {
+    margin: 0; font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-weight: 400; font-size: clamp(4.5rem, 16vw, 8rem); line-height: 0.9; letter-spacing: -0.02em;
+    color: rgba(240, 246, 244, 0.92); filter: blur(0.6px);
+  }
+  .lede { margin: 1.1rem 0 2rem; font-size: 1.05rem; line-height: 1.55; color: var(--steam-dim); max-width: 26rem; }
+  #go {
+    font: inherit; font-size: 1.05rem; padding: 0.8rem 2.2rem; border-radius: 999px; cursor: pointer;
+    color: var(--steam); background: var(--glass); border: 1px solid var(--glass-edge);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    transition: background 0.2s;
+  }
+  #go:hover { background: rgba(255, 255, 255, 0.24); }
+  #go:focus-visible, #shutter:focus-visible, #brush input:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+  #go:disabled { opacity: 0.6; cursor: progress; }
+  .priv { margin: 1.6rem 0 0; font-size: 0.95rem; line-height: 1.5; color: var(--steam); max-width: 26rem; }
+  .how { margin: 1.4rem 0 0; padding: 0; list-style: none; font-size: 0.9rem; line-height: 1.7; color: var(--steam-dim); }
+  #err { margin: 1.2rem 0 0; min-height: 0; font-size: 0.95rem; line-height: 1.5; color: var(--alert); max-width: 26rem; }
+  #err:empty { display: none; }
+
+  /* ---------- in-app chrome ---------- */
+  #ui[hidden] { display: none; }
+  #brush {
+    position: fixed; z-index: 10; left: calc(16px + env(safe-area-inset-left)); bottom: calc(16px + env(safe-area-inset-bottom));
+    display: flex; align-items: center; gap: 10px; padding: 9px 16px 9px 15px; border-radius: 999px;
+    background: var(--glass); border: 1px solid var(--glass-edge);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2); backdrop-filter: blur(14px) saturate(1.2);
+    color: #fff; font-size: 13px; letter-spacing: 0.02em; text-transform: none; user-select: none;
+  }
+  #brush input { width: 130px; margin: 0; accent-color: #fff; }
+  #shutter {
+    position: fixed; z-index: 10; right: calc(16px + env(safe-area-inset-right)); bottom: calc(16px + env(safe-area-inset-bottom));
+    width: 56px; height: 56px; padding: 0; border-radius: 50%; cursor: pointer;
+    background: var(--glass); border: 1px solid var(--glass-edge);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    display: grid; place-items: center;
+  }
+  #shutter::after { content: ""; width: 34px; height: 34px; border-radius: 50%; background: rgba(255, 255, 255, 0.92); transition: transform 0.12s; }
+  #shutter:active::after { transform: scale(0.82); }
+  #hint, #status {
+    position: fixed; z-index: 10; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none;
+    top: calc(14px + env(safe-area-inset-top)); font-size: 13px; color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+    max-width: calc(100% - 32px);
+  }
+  #hint { transition: opacity 1.5s; }
+  #hint.gone { opacity: 0; }
+  #status { top: calc(44px + env(safe-area-inset-top)); }
+  #status:empty { display: none; }
+  #fatal {
+    position: fixed; z-index: 40; left: 12px; right: 12px; top: 12px; padding: 10px 14px; border-radius: 12px;
+    background: rgba(60, 20, 14, 0.92); color: #ffd9cf; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
+  }
+  #fatal[hidden] { display: none; }
+  #flash { position: fixed; inset: 0; z-index: 30; background: #fff; opacity: 0; pointer-events: none; transition: opacity 0.35s; }
+  #debug { position: fixed; z-index: 10; left: 16px; top: 70px; font: 12px ui-monospace, Menlo, monospace; color: #fff; text-shadow: 0 1px 4px #000; white-space: pre; }
+  @media (prefers-reduced-motion: reduce) { #hint, #flash { transition: none; } }
+</style>
+<!-- MediaPipe: exact versions pinned. camera_utils is deliberately NOT loaded. -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4.1646425229/face_detection.js" crossorigin="anonymous"></script>
+</head>
+<body>
+
+<video id="cam" playsinline muted></video>
+<canvas id="view" class="layer"></canvas>
+<canvas id="fx" class="layer"></canvas>
+
+<div id="ui" hidden>
+  <div id="hint">breathe on the glass · pinch to draw · fist to wipe · hold space to fog</div>
+  <div id="status"></div>
+  <label id="brush"><span>brush</span><input id="size" type="range" min="7" max="38" step="1" value="15" aria-label="brush size"></label>
+  <button id="shutter" type="button" aria-label="Save this frame as a PNG"></button>
+</div>
+<div id="debug" hidden></div>
+<div id="flash"></div>
+<div id="fatal" hidden></div>
+
+<main id="start">
+  <div class="card">
+    <h1>fog</h1>
+    <p class="lede">Your webcam becomes a bathroom mirror that has steamed over. Breathe on it, then draw on the glass.</p>
+    <button id="go" type="button">begin</button>
+    <p class="priv">Everything runs in this browser tab. No frames, audio, or data ever leave your machine.</p>
+    <p id="err" role="alert"></p>
+    <ul class="how">
+      <li>Breathe at your laptop and fog blooms.</li>
+      <li>Pinch thumb and index finger to draw on the fog.</li>
+      <li>Make a fist and swipe to wipe a wide area clear.</li>
+      <li>Space fogs without breathing. C clears. S saves. Esc returns here.</li>
+    </ul>
+  </div>
+</main>
+
+<script>
+'use strict';
+
+/* ======================================================================
+   Tuning. Values come from a working build; start here.
+   ====================================================================== */
+const CFG = {
+  // fog + frost
+  fogStart: 0.55,
+  blur: 18,                  // CSS px, multiplied by dpr
+  brightness: 1.18,
+  tint: 'rgba(242,238,231,0.62)',
+  // breath
+  blobs: 12,
+  blobAlpha: 0.36,
+  blobBlur: 0.60,            // blob's own soft edge as a fraction of its radius
+  reach: 0.43,               // of the screen's short edge
+  spreadX: 1.45,
+  centreEase: 0.4,
+  faceEvery: 5,              // frames
+  trigger: 0.0025,           // level > floor + trigger
+  full: 0.003,               // full strength at floor + full
+  floorDown: 0.05,
+  floorUp: 0.0008,
+  warmFrames: 45,
+  keyIgnoreMs: 300,
+  // drawing
+  pinchDown: 0.22,
+  pinchUp: 0.38,
+  easeRaw: 0.45,
+  chaseBrush: 0.22,
+  chaseStar: 0.55,
+  tremor: 0.0006,            // of screen width
+  holdMs: 250,
+  releaseFrames: 2,
+  // fist wipe
+  wipeScale: 1.6,
+  wipeAlpha: 0.34,
+  wipeMaxStamps: 40,
+  jumpFrac: 0.30             // of screen width
+};
+
+/* ---------- DOM ---------- */
+const $ = (id) => document.getElementById(id);
+const startScreen = $('start'), goBtn = $('go'), errEl = $('err');
+const ui = $('ui'), statusEl = $('status'), hintEl = $('hint');
+const sizeInput = $('size'), shutter = $('shutter'), flashEl = $('flash');
+const fatalEl = $('fatal'), debugEl = $('debug');
+const video = $('cam');
+const view = $('view'), vctx = view.getContext('2d');
+const fxCanvas = $('fx'), xctx = fxCanvas.getContext('2d');
+
+/* Loud failures: show them, never swallow them (the console still gets the throw). */
+function showFatal(msg) { fatalEl.hidden = false; fatalEl.textContent = 'fog crashed: ' + msg; }
+window.addEventListener('error', (e) => showFatal(e.message));
+window.addEventListener('unhandledrejection', (e) => showFatal(String((e.reason && e.reason.message) || e.reason)));
+
+/* ---------- canvases, all in device pixels ---------- */
+const HAS_FILTER = 'filter' in CanvasRenderingContext2D.prototype;
+const frost = document.createElement('canvas');
+const frctx = frost.getContext('2d');
+const small = document.createElement('canvas');           // blur fallback when ctx.filter is missing
+const sctx = small.getContext('2d');
+let fog = null, fctx = null;                              // the fog canvas: stores only "how much fog" in alpha
+let dpr = 1, W = 0, H = 0;
+const L = { s: 1, dw: 0, dh: 0, ox: 0, oy: 0 };           // cover-fit of the video into the view
+
+function resize() {
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(2, Math.round(window.innerWidth * dpr));
+  const h = Math.max(2, Math.round(window.innerHeight * dpr));
+  if (w === W && h === H && fog) return;
+  W = w; H = h;
+  view.width = W; view.height = H;
+  fxCanvas.width = W; fxCanvas.height = H;
+  frost.width = W; frost.height = H;
+  const nf = document.createElement('canvas');
+  nf.width = W; nf.height = H;
+  const nctx = nf.getContext('2d');
+  if (fog) {
+    nctx.drawImage(fog, 0, 0, W, H);                       // keep what's been wiped
+  } else {
+    nctx.fillStyle = 'rgba(255,255,255,' + CFG.fogStart + ')';
+    nctx.fillRect(0, 0, W, H);
+  }
+  fog = nf; fctx = nctx;
+  const sw = Math.max(8, Math.round(W / (CFG.blur * dpr * 0.6)));
+  small.width = sw; small.height = Math.max(8, Math.round(sw * H / W));
+}
+
+function resetFog() {
+  fctx.globalCompositeOperation = 'source-over';
+  fctx.clearRect(0, 0, W, H);
+  fctx.fillStyle = 'rgba(255,255,255,' + CFG.fogStart + ')';
+  fctx.fillRect(0, 0, W, H);
+}
+
+function layout() {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  L.s = Math.max(W / vw, H / vh);
+  L.dw = vw * L.s; L.dh = vh * L.s;
+  L.ox = (W - L.dw) / 2; L.oy = (H - L.dh) / 2;
+}
+/* normalised camera coords (unmirrored) -> view pixels (mirrored) */
+function mapPt(nx, ny) { return { x: L.ox + (1 - nx) * L.dw, y: L.oy + ny * L.dh }; }
+
+function drawCam(ctx, bleed) {
+  ctx.save();
+  ctx.translate(W, 0); ctx.scale(-1, 1);                   // mirror, like a real mirror
+  ctx.drawImage(video, L.ox - bleed, L.oy - bleed, L.dw + 2 * bleed, L.dh + 2 * bleed);
+  ctx.restore();
+}
+
+/* ---------- state ---------- */
+let running = false, stream = null, audioCtx = null, analyser = null, abuf = null, noMic = false;
+let hands = null, faces = null, modelsReady = false, trackingReady = false, inFlight = false;
+let frameNo = 0, lastFaceFrame = -999;
+let lastKey = -1e9, spaceHeld = false;
+let floorLevel = null, warm = 0, lastLevel = 0, lastStrength = 0;
+let mouthU = 0.5, mouthV = 0.6;                            // fog centre target, as screen fractions
+const fogC = { x: 0, y: 0 };
+let fogCInit = false;
+
+let hand = null;                                           // latest hand reading, or null
+let lastHandSeen = -1e9;
+let penDown = false, releasedFrames = 0, lastPinchSeen = 0;
+let wiping = false, wipeLast = null, wipeSm = null;
+const raw = { x: 0, y: 0 }, eased = { x: 0, y: 0 }, brush = { x: 0, y: 0 };
+const prevPt = { x: 0, y: 0 }, midPt = { x: 0, y: 0 }, star = { x: 0, y: 0 };
+let starA = 0;
+
+const brushR = () => Number(sizeInput.value) * dpr;        // slider is CSS px
+
+/* ---------- erasing ---------- */
+function erase(draw) {
+  fctx.globalCompositeOperation = 'destination-out';       // subtract from fog; never paint
+  draw(fctx);
+  fctx.globalCompositeOperation = 'source-over';
+}
+
+function stamp(x, y, r) {
+  erase((c) => {
+    const g = c.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(0,0,0,' + CFG.wipeAlpha + ')');
+    g.addColorStop(0.6, 'rgba(0,0,0,' + (CFG.wipeAlpha * 0.7) + ')');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    c.fillStyle = g;
+    c.fillRect(x - r, y - r, 2 * r, 2 * r);
+  });
+}
+
+function wipeStep(c, r) {
+  if (!wipeLast) { wipeLast = { x: c.x, y: c.y }; stamp(c.x, c.y, r); return; }
+  const dx = c.x - wipeLast.x, dy = c.y - wipeLast.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist > CFG.jumpFrac * W) {                           // tracking dropout: don't paint a streak
+    stamp(c.x, c.y, r);
+    wipeLast = { x: c.x, y: c.y };
+    return;
+  }
+  const step = r * 0.5;
+  const n = Math.floor(dist / step);
+  if (n === 0) return;                                     // keep accumulating distance
+  const k = Math.min(n, CFG.wipeMaxStamps);
+  const ux = dx / dist, uy = dy / dist;
+  for (let i = 1; i <= k; i++) stamp(wipeLast.x + ux * step * i, wipeLast.y + uy * step * i, r);
+  if (n > CFG.wipeMaxStamps) wipeLast = { x: c.x, y: c.y };
+  else wipeLast = { x: wipeLast.x + ux * step * n, y: wipeLast.y + uy * step * n };
+}
+
+function penStart(p, now) {
+  penDown = true; releasedFrames = 0; lastPinchSeen = now;
+  raw.x = eased.x = brush.x = prevPt.x = midPt.x = star.x = p.x;
+  raw.y = eased.y = brush.y = prevPt.y = midPt.y = star.y = p.y;
+  const r = brushR();
+  erase((c) => { c.fillStyle = '#000'; c.beginPath(); c.arc(p.x, p.y, r, 0, Math.PI * 2); c.fill(); });
+}
+
+function penEnd() {
+  if (!penDown) return;
+  const r = brushR();
+  erase((c) => {
+    c.strokeStyle = '#000'; c.lineWidth = 2 * r; c.lineCap = 'round'; c.lineJoin = 'round';
+    c.beginPath(); c.moveTo(midPt.x, midPt.y); c.lineTo(prevPt.x, prevPt.y); c.stroke();
+  });
+  penDown = false; releasedFrames = 0;
+}
+
+function strokeBreak(p) {                                  // jump without drawing a line across the gap
+  eased.x = brush.x = prevPt.x = midPt.x = p.x;
+  eased.y = brush.y = prevPt.y = midPt.y = p.y;
+}
+
+function drawSegment() {
+  const r = brushR();
+  const mx = (prevPt.x + brush.x) / 2, my = (prevPt.y + brush.y) / 2;
+  erase((c) => {
+    c.strokeStyle = '#000'; c.lineWidth = 2 * r; c.lineCap = 'round'; c.lineJoin = 'round';
+    c.beginPath();
+    c.moveTo(midPt.x, midPt.y);
+    c.quadraticCurveTo(prevPt.x, prevPt.y, mx, my);        // curve through each pair's midpoint
+    c.stroke();
+  });
+  midPt.x = mx; midPt.y = my;
+  prevPt.x = brush.x; prevPt.y = brush.y;
+}
+
+/* ---------- fogging ---------- */
+function breathe(strength) {
+  const R = CFG.reach * Math.min(W, H);
+  const cx = fogC.x, cy = fogC.y + R * 0.12;               // breath falls: centre a little below the mouth
+  fctx.globalCompositeOperation = 'source-over';
+  for (let i = 0; i < CFG.blobs; i++) {
+    const a = Math.random() * Math.PI * 2;
+    const d = Math.sqrt(Math.random()) * R * 0.45;
+    const x = cx + Math.cos(a) * d * CFG.spreadX;          // breath drifts sideways
+    const y = cy + Math.sin(a) * d;
+    const r = R * (0.34 + Math.random() * 0.26);
+    const g = fctx.createRadialGradient(x, y, r * (1 - CFG.blobBlur), x, y, r);
+    g.addColorStop(0, 'rgba(255,255,255,' + (CFG.blobAlpha * strength) + ')');
+    g.addColorStop(1, 'rgba(255,255,255,0)');
+    fctx.fillStyle = g;
+    fctx.fillRect(x - r, y - r, 2 * r, 2 * r);
+  }
+}
+
+/* ---------- microphone: a floor that follows the room ---------- */
+function readLevel() {
+  if (!analyser) return 0;
+  analyser.getFloatTimeDomainData(abuf);
+  let s = 0;
+  for (let i = 0; i < abuf.length; i++) s += abuf[i] * abuf[i];
+  return Math.sqrt(s / abuf.length);                       // RMS
+}
+
+function breathStrength(now) {
+  const level = readLevel();
+  lastLevel = level;
+  if (floorLevel === null) floorLevel = level;
+  let strength = 0;
+  if (warm < CFG.warmFrames) {                             // let the floor settle before listening
+    floorLevel += (level - floorLevel) * 0.1;
+    warm++;
+  } else {
+    const excess = level - floorLevel;
+    if (excess > CFG.trigger && now - lastKey > CFG.keyIgnoreMs) {
+      strength = Math.min(1, excess / CFG.full);
+    }
+    // falls fast, rises slow: one quiet moment can't pin it, a loud one can't drag it up
+    floorLevel += (level - floorLevel) * (level < floorLevel ? CFG.floorDown : CFG.floorUp);
+  }
+  lastStrength = strength;
+  return strength;
+}
+
+/* ---------- tracking callbacks ---------- */
+function onHands(res) {
+  if (!running) return;
+  const now = performance.now();
+  const lms = res.multiHandLandmarks && res.multiHandLandmarks[0];
+  if (!lms) {
+    hand = null; wipeLast = null; wipeSm = null; wiping = false;
+    if (penDown && now - lastHandSeen > CFG.holdMs) penEnd();   // a vanished hand doesn't lift the pen at once
+    return;
+  }
+  lastHandSeen = now;
+  const P = lms.map((p) => mapPt(p.x, p.y));
+  const d = (a, b) => Math.hypot(P[a].x - P[b].x, P[a].y - P[b].y);
+  const palm = d(0, 9) || 1;                               // wrist -> middle knuckle
+  const ratio = d(4, 8) / palm;                            // pinch, relative to hand size
+  const curled = (tip, pip) => d(tip, 0) < d(pip, 0);
+  const fist = curled(8, 6) && curled(12, 10) && curled(16, 14) && curled(20, 18);
+  const indexOut = d(8, 0) > d(6, 0);
+  const handW = Math.max(d(5, 17), palm);                  // survives a side-on fist
+  hand = { ratio, fist };
+  const tip = P[8];
+
+  if (!penDown) {
+    if (ratio < CFG.pinchDown && indexOut && !fist) penStart(tip, now);   // index check only at pen-down
+  } else {
+    raw.x = tip.x; raw.y = tip.y;
+    if (ratio < CFG.pinchUp) {
+      lastPinchSeen = now;
+      if (releasedFrames > 0) {
+        releasedFrames = 0;
+        if (Math.hypot(raw.x - brush.x, raw.y - brush.y) > 6 * brushR()) strokeBreak(raw);
+      }
+    } else {
+      releasedFrames++;
+      if (releasedFrames >= CFG.releaseFrames && now - lastPinchSeen >= CFG.holdMs) penEnd();
+    }
+    if (penDown && Math.hypot(raw.x - brush.x, raw.y - brush.y) > CFG.jumpFrac * W) strokeBreak(raw);
+  }
+
+  wiping = fist && !penDown;
+  if (wiping) {
+    const c = { x: 0, y: 0 };
+    for (const i of [0, 5, 9, 13, 17]) { c.x += P[i].x / 5; c.y += P[i].y / 5; }
+    wipeSm = wipeSm ? { x: wipeSm.x + (c.x - wipeSm.x) * 0.6, y: wipeSm.y + (c.y - wipeSm.y) * 0.6 } : c;
+    wipeStep(wipeSm, CFG.wipeScale * handW);
+  } else {
+    wipeLast = null; wipeSm = null;
+  }
+}
+
+function onFace(res) {
+  if (!running) return;
+  const det = res.detections && res.detections[0];
+  if (!det) return;
+  const pts = det.landmarks || det.keypoints;
+  const m = pts && pts[3];                                 // keypoint 3 = mouth centre
+  if (!m) return;
+  const p = mapPt(m.x, m.y);
+  mouthU = p.x / W; mouthV = p.y / H;
+}
+
+function pump() {
+  if (!trackingReady || inFlight || video.readyState < 2) return;
+  inFlight = true;                                         // exactly one call in flight
+  (async () => {
+    await hands.send({ image: video });
+    if (frameNo - lastFaceFrame >= CFG.faceEvery) {
+      lastFaceFrame = frameNo;
+      await faces.send({ image: video });
+    }
+    inFlight = false;
+  })();
+}
+
+/* ---------- the frame ---------- */
+function loop() {
+  if (!running) return;
+  frameNo++;
+  const now = performance.now();
+
+  if (video.videoWidth) {
+    layout();
+
+    // fog centre trails the mouth
+    if (!fogCInit) { fogC.x = mouthU * W; fogC.y = mouthV * H; fogCInit = true; }
+    fogC.x += (mouthU * W - fogC.x) * CFG.centreEase;
+    fogC.y += (mouthV * H - fogC.y) * CFG.centreEase;
+
+    // fog up (paused while drawing or wiping, so the two don't fight)
+    const strength = breathStrength(now);
+    const space = spaceHeld ? 1 : 0;
+    if (!penDown && !wiping && frameNo % 2 === 0) {
+      const s = Math.max(strength, space);
+      if (s > 0) breathe(s);
+    }
+
+    // pen
+    if (penDown && hand && releasedFrames === 0) {
+      eased.x += (raw.x - eased.x) * CFG.easeRaw;
+      eased.y += (raw.y - eased.y) * CFG.easeRaw;
+      brush.x += (eased.x - brush.x) * CFG.chaseBrush;
+      brush.y += (eased.y - brush.y) * CFG.chaseBrush;
+      if (Math.hypot(brush.x - prevPt.x, brush.y - prevPt.y) >= CFG.tremor * W) drawSegment();
+    }
+
+    // layer 1: camera, mirrored
+    vctx.globalCompositeOperation = 'source-over';
+    drawCam(vctx, 0);
+
+    // layer 3: frost = blurred, brightened, tinted camera, masked by the fog canvas
+    frctx.globalCompositeOperation = 'source-over';
+    frctx.clearRect(0, 0, W, H);
+    const blurPx = CFG.blur * dpr;
+    if (HAS_FILTER) {
+      frctx.filter = 'blur(' + blurPx + 'px) brightness(' + CFG.brightness + ')';
+      drawCam(frctx, blurPx * 2);                          // bleed so blurred edges don't fade out
+      frctx.filter = 'none';
+    } else {
+      sctx.save();
+      sctx.scale(small.width / W, small.height / H);
+      drawCam(sctx, 0);
+      sctx.restore();
+      frctx.imageSmoothingQuality = 'high';
+      frctx.drawImage(small, 0, 0, W, H);
+    }
+    frctx.fillStyle = CFG.tint;
+    frctx.fillRect(0, 0, W, H);
+    frctx.globalCompositeOperation = 'destination-in';     // keep frost only where there is fog
+    frctx.drawImage(fog, 0, 0);
+    frctx.globalCompositeOperation = 'source-over';
+    vctx.drawImage(frost, 0, 0);
+
+    // star at the pinch point (separate layer, so saved PNGs are clean)
+    xctx.clearRect(0, 0, W, H);
+    const wantStar = penDown && hand ? 1 : 0;
+    starA += (wantStar - starA) * 0.3;
+    if (penDown && hand) {
+      star.x += (raw.x - star.x) * CFG.chaseStar;
+      star.y += (raw.y - star.y) * CFG.chaseStar;
+    }
+    if (starA > 0.02) drawStar(now);
+
+    pump();
+  }
+
+  if (!debugEl.hidden) {
+    debugEl.textContent = 'level ' + lastLevel.toFixed(4) + '\nfloor ' + (floorLevel || 0).toFixed(4) +
+      '\nstrength ' + lastStrength.toFixed(2) + '\npen ' + penDown + '  wipe ' + wiping +
+      '\nratio ' + (hand ? hand.ratio.toFixed(2) : '-');
+  }
+  requestAnimationFrame(loop);
+}
+
+function drawStar(t) {
+  const s = 11 * dpr * (1 + 0.1 * Math.sin(t / 110));
+  xctx.save();
+  xctx.globalAlpha = starA;
+  xctx.translate(star.x, star.y);
+  xctx.rotate(t / 1800);
+  xctx.shadowColor = 'rgba(255,246,222,0.95)';
+  xctx.shadowBlur = 16 * dpr;
+  xctx.fillStyle = '#fffdf4';
+  xctx.beginPath();
+  for (let i = 0; i < 8; i++) {
+    const a = (i * Math.PI) / 4 - Math.PI / 2;
+    const rr = i % 2 === 0 ? s : s * 0.3;
+    const x = Math.cos(a) * rr, y = Math.sin(a) * rr;
+    if (i === 0) xctx.moveTo(x, y); else xctx.lineTo(x, y);
+  }
+  xctx.closePath();
+  xctx.fill();
+  xctx.restore();
+}
+
+/* ---------- start / stop ---------- */
+function setError(msg) { errEl.textContent = msg; }
+
+async function loadModels() {
+  if (modelsReady) { trackingReady = true; return; }
+  statusEl.textContent = 'waking the mirror…';
+  hands = new window.Hands({
+    locateFile: (f) => 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/' + f
+  });
+  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+  hands.onResults(onHands);
+  faces = new window.FaceDetection({
+    locateFile: (f) => 'https://cdn.jsdelivr.net/npm/@mediapipe/face_detection@0.4.1646425229/' + f
+  });
+  faces.setOptions({ model: 'short', minDetectionConfidence: 0.5 });
+  faces.onResults(onFace);
+  await hands.initialize();
+  await faces.initialize();
+  modelsReady = true;
+  trackingReady = true;
+  statusEl.textContent = noMic ? 'no microphone found. Hold space to fog.' : '';
+}
+
+async function start() {
+  setError('');
+  if (!window.Hands || !window.FaceDetection) {
+    setError('Could not load MediaPipe from the CDN. Check your connection and reload the page.');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    setError('This page needs https or localhost to reach the camera. Opening the file by double-clicking (file://) will not work. Serve it locally, for example: python3 -m http.server, then open http://localhost:8000/fog.html');
+    return;
+  }
+  goBtn.disabled = true;
+  goBtn.textContent = 'asking…';
+
+  const AC = window.AudioContext || window.webkitAudioContext;
+  audioCtx = new AC();                                     // created inside the click so it may run
+  audioCtx.resume();
+
+  const video_c = { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' };
+  noMic = false;
+  try {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: video_c,
+        // browser "noise suppression" is built to delete the sound of breathing. Turn it all off.
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      });
+    } catch (e) {
+      if (e && e.name === 'NotFoundError') {                // maybe no mic: try camera alone
+        stream = await navigator.mediaDevices.getUserMedia({ video: video_c });
+        noMic = true;
+      } else {
+        throw e;
+      }
+    }
+  } catch (e) {
+    goBtn.disabled = false; goBtn.textContent = 'begin';
+    audioCtx.close(); audioCtx = null;
+    if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
+      setError('Camera or microphone permission was refused, so there is no mirror to fog. Allow both for this page (the camera icon in the address bar), then press begin again.');
+    } else if (e && e.name === 'NotFoundError') {
+      setError('No camera was found. Connect one and press begin again.');
+    } else if (e && e.name === 'NotReadableError') {
+      setError('The camera is in use by another app. Close it and press begin again.');
+    } else {
+      setError('Could not open the camera: ' + ((e && (e.name + ' ' + e.message)) || e));
+    }
+    return;
+  }
+
+  video.srcObject = new MediaStream(stream.getVideoTracks());   // video only, so the mic never plays back
+  await video.play();
+
+  analyser = null;
+  if (stream.getAudioTracks().length) {
+    const src = audioCtx.createMediaStreamSource(new MediaStream(stream.getAudioTracks()));
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 1024;
+    src.connect(analyser);                                  // analyser only: never to the speakers
+    abuf = new Float32Array(analyser.fftSize);
+  } else {
+    noMic = true;
+  }
+
+  // fresh session
+  resize();
+  resetFog();
+  floorLevel = null; warm = 0; fogCInit = false; mouthU = 0.5; mouthV = 0.6;
+  hand = null; penDown = false; wiping = false; wipeLast = null; wipeSm = null; starA = 0;
+  inFlight = false; trackingReady = false; lastFaceFrame = -999;
+  startScreen.hidden = true;
+  ui.hidden = false;
+  hintEl.classList.remove('gone');
+  setTimeout(() => hintEl.classList.add('gone'), 9000);
+  goBtn.disabled = false; goBtn.textContent = 'begin';
+  statusEl.textContent = noMic ? 'no microphone found. Hold space to fog.' : '';
+  running = true;
+  requestAnimationFrame(loop);
+  await loadModels();
+}
+
+function stop() {
+  running = false; trackingReady = false;
+  penDown = false; wiping = false; spaceHeld = false;
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  if (audioCtx) { audioCtx.close(); audioCtx = null; }
+  analyser = null;
+  video.srcObject = null;
+  ui.hidden = true;
+  startScreen.hidden = false;
+}
+
+/* ---------- saving ---------- */
+function save() {
+  if (!running) return;
+  view.toBlob((blob) => {
+    const a = document.createElement('a');
+    const t = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    a.download = 'fog-' + t.getFullYear() + p(t.getMonth() + 1) + p(t.getDate()) + '-' + p(t.getHours()) + p(t.getMinutes()) + p(t.getSeconds()) + '.png';
+    a.href = URL.createObjectURL(blob);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }, 'image/png');
+  flashEl.style.transition = 'none';
+  flashEl.style.opacity = '0.6';
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    flashEl.style.transition = 'opacity 0.35s';
+    flashEl.style.opacity = '0';
+  }));
+}
+
+/* ---------- input ---------- */
+goBtn.addEventListener('click', start);
+shutter.addEventListener('click', save);
+window.addEventListener('resize', () => { if (fog) resize(); });
+
+window.addEventListener('keydown', (e) => {
+  lastKey = performance.now();                             // typing must not fog the screen
+  if (!running) return;
+  if (e.code === 'Space') { spaceHeld = true; e.preventDefault(); return; }
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  if (e.key === 'Escape') stop();
+  else if (e.key === 'c' || e.key === 'C') resetFog();
+  else if (e.key === 's' || e.key === 'S') save();
+});
+window.addEventListener('keyup', (e) => { if (e.code === 'Space') spaceHeld = false; });
+window.addEventListener('blur', () => { spaceHeld = false; });
+
+if (location.hash === '#debug') debugEl.hidden = false;
+resize();
+</script>
+</body>
+</html>
